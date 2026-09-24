@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
 import { buildSystemPrompt } from './src/prompt.js';
 import { getRelevantKnowledge, refreshKnowledge } from './src/knowledge.js';
-import { extractPhone, saveLead } from './src/lead.js';
+import { extractPhone, saveLead, isSheetsConfigured } from './src/lead.js';
 
 const app = express();
 app.use(cors());
@@ -24,7 +24,11 @@ function getSession(id) {
 }
 
 app.get('/api/health', (_, res) => {
-  res.json({ ok: true, geminiConfigured: Boolean(process.env.GEMINI_API_KEY) });
+  res.json({
+    ok: true,
+    geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+    sheetsConfigured: isSheetsConfigured()
+  });
 });
 
 app.post('/api/chat', async (req, res) => {
@@ -64,23 +68,28 @@ app.post('/api/chat', async (req, res) => {
     const phone = extractPhone(message);
     let leadResult = null;
     if (phone && !session.leadSaved) {
-      leadResult = await saveLead({
-        instagramUsername: source === 'instagram' ? instagramUsername : '',
-        name: '',
-        phone,
-        model: '',
-        city: '',
-        landStatus: '',
-        budget: '',
-        intent: 'DM/Web bilgi talebi',
-        summary: session.history
-          .slice(-8)
-          .map(x => `${x.role === 'user' ? 'Kullanıcı' : 'Asistan'}: ${x.parts?.[0]?.text || ''}`)
-          .join(' | ')
-          .slice(0, 1800),
-        source
-      });
-      session.leadSaved = true;
+      try {
+        leadResult = await saveLead({
+          instagramUsername: source === 'instagram' ? instagramUsername : '',
+          name: '',
+          phone,
+          model: '',
+          city: '',
+          landStatus: '',
+          budget: '',
+          intent: 'DM/Web bilgi talebi',
+          summary: session.history
+            .slice(-8)
+            .map(x => `${x.role === 'user' ? 'Kullanıcı' : 'Asistan'}: ${x.parts?.[0]?.text || ''}`)
+            .join(' | ')
+            .slice(0, 1800),
+          source
+        });
+        session.leadSaved = !leadResult?.skipped;
+      } catch (e) {
+        console.error('Lead save error:', e.message);
+        leadResult = { success: false, error: 'Lead kaydedilemedi' };
+      }
     }
 
     res.json({ sessionId: sid, reply, leadSaved: Boolean(phone && session.leadSaved), leadResult });
@@ -100,4 +109,7 @@ app.post('/api/admin/refresh-knowledge', async (_, res) => {
 });
 
 const port = Number(process.env.PORT || 3000);
-app.listen(port, () => console.log(`ifHaus chatbot running on http://localhost:${port}`));
+app.listen(port, () => {
+  console.log(`ifHaus chatbot running on http://localhost:${port}`);
+  if (!isSheetsConfigured()) console.warn('Google Sheets lead kaydı kapalı: GOOGLE_SHEETS_WEBHOOK_URL ve LEAD_WEBHOOK_SECRET .env içinde tanımlı olmalı.');
+});
