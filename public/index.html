@@ -20,7 +20,7 @@
 let sessionId = localStorage.getItem('ifhausSessionId') || '';
 const msgs=document.getElementById('msgs'), form=document.getElementById('form'), input=document.getElementById('input');
 function add(t,c){const d=document.createElement('div');d.className='m '+c;d.textContent=t;msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight}
-form.addEventListener('submit',async e=>{e.preventDefault();const message=input.value.trim();if(!message)return;add(message,'user');input.value='';add('Yazıyor…','bot');const typing=msgs.lastChild;try{const r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({message,sessionId,source:'web'})});const j=await r.json();typing.remove();if(j.sessionId){sessionId=j.sessionId;localStorage.setItem('ifhausSessionId',sessionId)}add(j.reply||'Bir sorun oluştu.','bot')}catch{typing.remove();add('Şu anda bağlantı kurulamadı. Lütfen tekrar deneyin.','bot')}})
+form.addEventListener('submit',async e=>{e.preventDefault();const message=input.value.trim();if(!message)return;add(message,'user');input.value='';add('Yazıyor…','bot');const typing=msgs.lastChild;try{const r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({message,sessionId,source:'web'})});const j=await r.json();typing.remove();if(j.sessionId){sessionId=j.sessionId;localStorage.setItem('ifhausSessionId',sessionId)}if(j.silent)return;add(j.reply||'Bir sorun oluştu.','bot')}catch{typing.remove();add('Şu anda bağlantı kurulamadı. Lütfen tekrar deneyin.','bot')}})
 </script>
 </body>
 </html>

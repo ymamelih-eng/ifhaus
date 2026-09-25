@@ -84,3 +84,14 @@ export async function getRelevantKnowledge(query) {
     .join('\n\n---\n\n')
     .slice(0, 28000);
 }
+
+// Model names derived from cached model page URLs (e.g. /modeller/villa-nova/ -> "villa nova").
+// Used by the scope guard so model names count as in-scope without an LLM call.
+export function getModelNames() {
+  return pages
+    .map(p => {
+      const m = p.url.match(/ifhaus\.com\/(?:modeller|model)\/([^/?#]+)/i);
+      return m ? decodeURIComponent(m[1]).replace(/-/g, ' ') : null;
+    })
+    .filter(Boolean);
+}

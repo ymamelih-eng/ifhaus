@@ -2,10 +2,23 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
-import { GoogleGenAI } from '@google/genai';
 import { buildSystemPrompt } from './src/prompt.js';
-import { getRelevantKnowledge, refreshKnowledge } from './src/knowledge.js';
+import { getRelevantKnowledge, refreshKnowledge, getModelNames } from './src/knowledge.js';
 import { extractPhone, saveLead, isSheetsConfigured } from './src/lead.js';
+import {
+  checkScope,
+  CLASSIFIER_SYSTEM,
+  parseClassifierOutput,
+  OUT_OF_SCOPE_REPLY,
+  OUT_OF_SCOPE_TOKEN
+} from './src/scope.js';
+import {
+  generate,
+  activeProvider,
+  fallbackProvider,
+  isAnthropicConfigured,
+  isGeminiConfigured
+} from './src/ai.js';
 
 const app = express();
 app.use(cors());
@@ -13,20 +26,62 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.static('public'));
 
 const sessions = new Map();
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 const ifHausPhone = process.env.IFHAUS_PHONE || '08505322458';
 
 function getSession(id) {
   const sid = id || crypto.randomUUID();
-  if (!sessions.has(sid)) sessions.set(sid, { history: [], userMessages: 0, leadSaved: false });
+  if (!sessions.has(sid)) {
+    sessions.set(sid, { history: [], userMessages: 0, leadSaved: false, outOfScopeReplied: false });
+  }
   return [sid, sessions.get(sid)];
+}
+
+// Chat replies are shown as plain DM text: strip markdown the model may still produce.
+function toPlainText(text) {
+  return text
+    .replace(/\*\*|__|`/g, '')
+    .split('\n')
+    .map(line => line.replace(/^\s*(#{1,6}\s+|[-*•]\s+|\d+[.)]\s+)/, '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+}
+
+async function classifyScope(message, session) {
+  const lastReply = [...session.history].reverse().find(m => m.role === 'assistant')?.text;
+  const text = lastReply
+    ? `Önceki asistan mesajı: ${lastReply.slice(0, 500)}\nKullanıcının son mesajı: ${message}`
+    : `Kullanıcının son mesajı: ${message}`;
+  try {
+    const { text: out } = await generate({
+      system: CLASSIFIER_SYSTEM,
+      history: [{ role: 'user', text }],
+      maxTokens: 256,
+      classifier: true
+    });
+    // Unparseable output: let the main prompt decide (it can still answer OUT_OF_SCOPE).
+    return parseClassifierOutput(out) || 'IN_SCOPE';
+  } catch {
+    return 'IN_SCOPE';
+  }
+}
+
+// First off-topic message in a conversation gets the fixed reply; later ones get no reply at all.
+function outOfScopeResponse(sid, session) {
+  if (session.outOfScopeReplied) {
+    return { sessionId: sid, reply: null, silent: true, outOfScope: true, leadSaved: session.leadSaved };
+  }
+  session.outOfScopeReplied = true;
+  return { sessionId: sid, reply: OUT_OF_SCOPE_REPLY, outOfScope: true, leadSaved: session.leadSaved };
 }
 
 app.get('/api/health', (_, res) => {
   res.json({
     ok: true,
-    geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+    aiProvider: activeProvider(),
+    fallbackProvider: fallbackProvider(),
+    anthropicConfigured: isAnthropicConfigured(),
+    geminiConfigured: isGeminiConfigured(),
     sheetsConfigured: isSheetsConfigured()
   });
 });
@@ -37,33 +92,35 @@ app.post('/api/chat', async (req, res) => {
     if (!message?.trim()) return res.status(400).json({ error: 'message required' });
 
     const [sid, session] = getSession(sessionId);
-    session.userMessages += 1;
+
+    await refreshKnowledge();
+    const guard = checkScope(message, { modelNames: getModelNames() });
+    let verdict = guard.verdict;
+    if (verdict === 'AMBIGUOUS') verdict = await classifyScope(message, session);
+    if (verdict === 'OUT_OF_SCOPE') return res.json(outOfScopeResponse(sid, session));
+
+    const meaningful = verdict !== 'SMALL_TALK';
+    const messageCount = session.userMessages + (meaningful ? 1 : 0);
 
     const knowledge = await getRelevantKnowledge(message);
     const systemInstruction = buildSystemPrompt({
       knowledge,
-      messageCount: session.userMessages,
+      messageCount,
       phone: ifHausPhone
     });
 
-    const contents = [
-      ...session.history.slice(-12),
-      { role: 'user', parts: [{ text: message }] }
-    ];
-
-    const response = await ai.models.generateContent({
-      model,
-      contents,
-      config: {
-        systemInstruction,
-        temperature: 0.25,
-        maxOutputTokens: 500
-      }
+    const { text } = await generate({
+      system: systemInstruction,
+      history: [...session.history.slice(-12), { role: 'user', text: message }],
+      maxTokens: 1024
     });
 
-    const reply = (response.text || 'Bu konuda ekibimiz yardımcı olabilir.').trim();
-    session.history.push({ role: 'user', parts: [{ text: message }] });
-    session.history.push({ role: 'model', parts: [{ text: reply }] });
+    if (text.includes(OUT_OF_SCOPE_TOKEN)) return res.json(outOfScopeResponse(sid, session));
+
+    const reply = toPlainText(text) || 'Bu konuda ekibimiz yardımcı olabilir.';
+    session.userMessages = messageCount;
+    session.history.push({ role: 'user', text: message });
+    session.history.push({ role: 'assistant', text: reply });
 
     const phone = extractPhone(message);
     let leadResult = null;
@@ -80,7 +137,7 @@ app.post('/api/chat', async (req, res) => {
           intent: 'DM/Web bilgi talebi',
           summary: session.history
             .slice(-8)
-            .map(x => `${x.role === 'user' ? 'Kullanıcı' : 'Asistan'}: ${x.parts?.[0]?.text || ''}`)
+            .map(x => `${x.role === 'user' ? 'Kullanıcı' : 'Asistan'}: ${x.text}`)
             .join(' | ')
             .slice(0, 1800),
           source
@@ -94,8 +151,8 @@ app.post('/api/chat', async (req, res) => {
 
     res.json({ sessionId: sid, reply, leadSaved: Boolean(phone && session.leadSaved), leadResult });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Chat error', detail: err.message });
+    console.error('Chat error:', err?.message);
+    res.status(500).json({ error: 'Chat error' });
   }
 });
 
@@ -111,5 +168,7 @@ app.post('/api/admin/refresh-knowledge', async (_, res) => {
 const port = Number(process.env.PORT || 3000);
 app.listen(port, () => {
   console.log(`ifHaus chatbot running on http://localhost:${port}`);
+  console.log(`AI provider: ${activeProvider()}${fallbackProvider() ? ` (fallback: ${fallbackProvider()})` : ''}`);
+  if (activeProvider() === 'anthropic' && !isAnthropicConfigured()) console.warn('ANTHROPIC_API_KEY .env içinde tanımlı değil.');
   if (!isSheetsConfigured()) console.warn('Google Sheets lead kaydı kapalı: GOOGLE_SHEETS_WEBHOOK_URL ve LEAD_WEBHOOK_SECRET .env içinde tanımlı olmalı.');
 });
