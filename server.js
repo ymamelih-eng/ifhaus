@@ -21,8 +21,16 @@ import {
 } from './src/ai.js';
 
 const app = express();
-app.use(cors());
+// ALLOWED_ORIGINS: comma-separated site origins allowed to call the API from the browser
+// (e.g. https://ifhaus.com,https://www.ifhaus.com). Empty = allow all (local development).
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+app.use(cors(allowedOrigins.length ? { origin: allowedOrigins } : {}));
 app.use(express.json({ limit: '1mb' }));
+// Embeddable site widget: loaded cross-origin via <script>, so it is cached briefly.
+app.use('/widget', express.static('public/widget', { maxAge: '1h' }));
 app.use(express.static('public'));
 
 const sessions = new Map();
@@ -149,7 +157,11 @@ app.post('/api/chat', async (req, res) => {
       }
     }
 
-    res.json({ sessionId: sid, reply, leadSaved: Boolean(phone && session.leadSaved), leadResult });
+    // After 2+ meaningful messages, the widget may show the call/leave-number CTA once.
+    const cta = session.userMessages >= 2 && !session.leadSaved && !session.ctaShown;
+    if (cta) session.ctaShown = true;
+
+    res.json({ sessionId: sid, reply, leadSaved: Boolean(phone && session.leadSaved), leadResult, cta });
   } catch (err) {
     console.error('Chat error:', err?.message);
     res.status(500).json({ error: 'Chat error' });

@@ -33,5 +33,16 @@ Mesajlar önce `src/scope.js` içindeki deterministic guard'dan geçer; açıkç
 ## 7) Bilgi kaynağı
 Sunucu ifhaus.com'daki temel sayfaları periyodik olarak çeker. `/api/admin/refresh-knowledge` ile manuel yenileme yapılabilir.
 
-## 8) Sonraki adım
+## 8) Site widget'ı
+Sağ alt köşedeki chat widget'ı bu backend tarafından sunulur. Siteye eklenecek tek şey şu satırdır (`</body>` öncesi):
+```html
+<script src="https://CHAT_BACKEND_URL/widget/ifhaus-chat.js" defer></script>
+```
+- `CHAT_BACKEND_URL`, bu Node servisinin public HTTPS adresidir (ör. `https://chat.ifhaus.com`). Widget API'yi varsayılan olarak script'in yüklendiği adresten çağırır; farklıysa `data-endpoint="https://..."` ekleyin.
+- İlk yüklemede sadece küçük buton script'i gelir (~7.5 KB); panel ilk açılışta (veya fare butonun üzerine geldiğinde) yüklenir.
+- Widget Shadow DOM içinde çalışır; sitenin CSS'i ve düzeni etkilenmez. Renkler sitede `:root` üzerinde `--ifhaus-accent`, `--ifhaus-dark`, `--ifhaus-soft`, `--ifhaus-line`, `--ifhaus-radius-lg/md/sm`, `--ifhaus-font`, `--ifhaus-font-display` gibi değişkenlerle ezilebilir. Yazı tipi varsayılan olarak siteden miras alınır.
+- Backend'de `ALLOWED_ORIGINS` değişkenine sitenin origin'lerini yazın.
+- Demo: `http://localhost:3000/widget-demo.html`
+
+## 9) Sonraki adım
 Web sürümü test edildikten sonra aynı `/api/chat` akışı Meta/Instagram Messaging webhook'una bağlanır.
