@@ -44,5 +44,13 @@ Sağ alt köşedeki chat widget'ı bu backend tarafından sunulur. Siteye eklene
 - Backend'de `ALLOWED_ORIGINS` değişkenine sitenin origin'lerini yazın.
 - Demo: `http://localhost:3000/widget-demo.html`
 
-## 9) Sonraki adım
+## 9) Meta (Messenger + Instagram DM)
+Aynı chatbot motoru (`src/chat.js`) Meta webhook'u üzerinden de çalışır; adapter `src/meta/` altındadır.
+- `GET /webhook/meta`: Meta webhook doğrulaması (`hub.mode`, `hub.verify_token`, `hub.challenge`; token `META_VERIFY_TOKEN` ile karşılaştırılır, yanlışsa 403).
+- `POST /webhook/meta`: Messenger (`object: page`) ve Instagram (`object: instagram`) mesaj event'leri. `X-Hub-Signature-256`, `META_APP_SECRET` ile doğrulanır; geçersizse veya secret tanımlı değilse 403. Meta'ya hemen 200 döner, AI işlemi arka planda yapılır. Echo/delivery/read event'leri ve metinsiz mesajlar işlenmez, aynı message ID bir kez işlenir. `silent: true` cevaplarda Meta'ya mesaj gönderilmez.
+- Cevaplar Send API ile gönderilir (`META_PAGE_ACCESS_TOKEN`; Instagram için isteğe bağlı `META_INSTAGRAM_ACCESS_TOKEN`). Token tanımlı değilse gönderim atlanır ve loglanır.
+- Lead kaydında `source` alanı kanala göre `Site`, `Instagram` veya `Facebook` olur; Meta kullanıcı ID'si `channelUserId` alanında gönderilir.
+- Meta Dashboard callback URL: `https://CHAT_BACKEND_URL/webhook/meta` (public HTTPS gerekir).
+
+## 10) Sonraki adım
 Web sürümü test edildikten sonra aynı `/api/chat` akışı Meta/Instagram Messaging webhook'una bağlanır.
