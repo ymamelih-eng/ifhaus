@@ -7,7 +7,7 @@
 
   var PHONE_DISPLAY = '0850 532 2458';
   var PHONE_TEL = '+908505322458';
-  var CTA_TEXT = 'Detaylı bilgi için ' + PHONE_DISPLAY + '’i arayabilir veya numaranızı bırakabilirsiniz.';
+  var CTA_TEXT = 'Detaylı bilgi için ' + PHONE_DISPLAY + '’i arayabilir veya telefon numaranızı bırakabilirsiniz, ekibimiz sizi arasın.';
   var WELCOME = 'Merhaba. ifHaus modelleri, arsanız ve süreç hakkında yardımcı olabilirim. Ne öğrenmek istersiniz?';
   var ERROR_TEXT = 'Şu anda yanıt veremiyorum. ' + PHONE_DISPLAY + ' numarasından bize ulaşabilirsiniz.';
   var QUICK_ACTIONS = [

@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
-import { buildSystemPrompt, CTA_MIN_MESSAGES } from './src/prompt.js';
+import { buildSystemPrompt } from './src/prompt.js';
 import { enforceGrounding } from './src/grounding.js';
 import { getRelevantKnowledge, refreshKnowledge, getModelNames } from './src/knowledge.js';
 import { extractPhone, saveLead, isSheetsConfigured } from './src/lead.js';
@@ -128,9 +128,7 @@ app.post('/api/chat', async (req, res) => {
 
     const reply = enforceGrounding(toPlainText(text) || 'Bu konuda ekibimiz yardımcı olabilir.', {
       knowledge,
-      userText: [...session.history.filter(m => m.role === 'user').map(m => m.text), message].join('\n'),
-      ctaAllowed: messageCount >= CTA_MIN_MESSAGES,
-      phone: ifHausPhone
+      userText: [...session.history.filter(m => m.role === 'user').map(m => m.text), message].join('\n')
     });
     session.userMessages = messageCount;
     session.history.push({ role: 'user', text: message });
@@ -163,8 +161,8 @@ app.post('/api/chat', async (req, res) => {
       }
     }
 
-    // After 2+ meaningful messages, the widget may show the call/leave-number CTA once.
-    const cta = session.userMessages >= CTA_MIN_MESSAGES && !session.leadSaved && !session.ctaShown;
+    // From the first meaningful message on, the widget may show the call/leave-number CTA once.
+    const cta = session.userMessages >= 1 && !session.leadSaved && !session.ctaShown;
     if (cta) session.ctaShown = true;
 
     res.json({ sessionId: sid, reply, leadSaved: Boolean(phone && session.leadSaved), leadResult, cta });
